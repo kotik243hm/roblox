@@ -396,7 +396,7 @@ for i, tabName in ipairs(tabs) do
             PastaLandGui:Destroy()
             print("PastaLand Unloaded Successfully")
         end))
-    elseif tabName ~= "Visuals" and tabName ~= "Rage" and tabName ~= "Legit" then
+    elseif tabName ~= "Visuals" and tabName ~= "Rage" and tabName ~= "Legit" and tabName ~= "Misc" then
         createComingSoon(contentFrame)
     end
 end
@@ -1645,6 +1645,205 @@ table.insert(Connections, RunService.Heartbeat:Connect(function(dt)
 end))
 
 -- ==========================================
+-- MISC PAGE SETUP
+-- ==========================================
+local miscPage = tabContents["Misc"]
+
+local MiscGroup = Instance.new("Frame")
+MiscGroup.Size = UDim2.new(0.5, -15, 1, -20)
+MiscGroup.Position = UDim2.new(0, 10, 0, 10)
+MiscGroup.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+MiscGroup.BorderColor3 = Color3.fromRGB(40, 40, 40)
+MiscGroup.BorderSizePixel = 1
+MiscGroup.Parent = miscPage
+
+local MiscGroupTitleBG = Instance.new("Frame")
+MiscGroupTitleBG.Size = UDim2.new(1, 0, 0, 15)
+MiscGroupTitleBG.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MiscGroupTitleBG.BorderSizePixel = 0
+MiscGroupTitleBG.Parent = MiscGroup
+
+local MiscGroupTitle = Instance.new("TextLabel")
+MiscGroupTitle.Size = UDim2.new(1, 0, 1, 0)
+MiscGroupTitle.BackgroundTransparency = 1
+MiscGroupTitle.Text = " Movement"
+MiscGroupTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+MiscGroupTitle.Font = Enum.Font.Code
+MiscGroupTitle.TextSize = 12
+MiscGroupTitle.TextXAlignment = Enum.TextXAlignment.Left
+MiscGroupTitle.Parent = MiscGroupTitleBG
+
+-- Auto Peek Toggle
+local AutoPeekEnabled = false
+
+local APToggleHitbox = Instance.new("TextButton")
+APToggleHitbox.Size = UDim2.new(1, -20, 0, 16)
+APToggleHitbox.Position = UDim2.new(0, 10, 0, 25)
+APToggleHitbox.BackgroundTransparency = 1
+APToggleHitbox.Text = ""
+APToggleHitbox.Parent = MiscGroup
+
+local APCircle = Instance.new("Frame")
+APCircle.Size = UDim2.new(0, 8, 0, 8)
+APCircle.Position = UDim2.new(0, 0, 0.5, -4)
+APCircle.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+APCircle.BorderSizePixel = 0
+APCircle.Parent = APToggleHitbox
+Instance.new("UICorner", APCircle).CornerRadius = UDim.new(1, 0)
+
+local APLabel = Instance.new("TextLabel")
+APLabel.Size = UDim2.new(1, -16, 1, 0)
+APLabel.Position = UDim2.new(0, 16, 0, 0)
+APLabel.BackgroundTransparency = 1
+APLabel.Text = "Auto Peek [V]"
+APLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+APLabel.Font = Enum.Font.Code
+APLabel.TextSize = 12
+APLabel.TextXAlignment = Enum.TextXAlignment.Left
+APLabel.Parent = APToggleHitbox
+
+table.insert(Connections, APToggleHitbox.MouseEnter:Connect(function()
+    TweenService:Create(APLabel, TweenInfo.new(0.15), {TextColor3 = Color3.fromRGB(255,255,255)}):Play()
+end))
+table.insert(Connections, APToggleHitbox.MouseLeave:Connect(function()
+    TweenService:Create(APLabel, TweenInfo.new(0.15), {TextColor3 = Color3.fromRGB(200,200,200)}):Play()
+end))
+table.insert(Connections, APToggleHitbox.MouseButton1Click:Connect(function()
+    AutoPeekEnabled = not AutoPeekEnabled
+    TweenService:Create(APCircle, TweenInfo.new(0.2), {BackgroundColor3 = AutoPeekEnabled and Color3.fromRGB(255,180,0) or Color3.fromRGB(255,50,50)}):Play()
+end))
+
+-- ==========================================
+-- AUTO PEEK LOGIC
+-- Hold V → save current position, place orange circle there. Move freely.
+-- V release or LMB → walk back to saved position at 1.2x WalkSpeed.
+-- Triggerbot fire → same return after shot.
+-- ==========================================
+local peekActive = false
+local peekReturning = false
+local peekOriginPos = nil
+local peekPath = {} -- recorded waypoints while peeking
+
+-- Flat neon cylinder on the ground at origin spot
+local PeekCircle = Instance.new("Part")
+PeekCircle.Name = "PastaLandPeekCircle"
+PeekCircle.Anchored = true
+PeekCircle.CanCollide = false
+PeekCircle.CastShadow = false
+PeekCircle.Size = Vector3.new(1, 1, 1)
+PeekCircle.CFrame = CFrame.new(0, -10000, 0)
+PeekCircle.Material = Enum.Material.Neon
+PeekCircle.Color = Color3.fromRGB(255, 180, 0)
+PeekCircle.Transparency = 1
+pcall(function() PeekCircle.Parent = workspace end)
+
+local PeekMesh = Instance.new("SpecialMesh")
+PeekMesh.MeshType = Enum.MeshType.Cylinder
+PeekMesh.Scale = Vector3.new(0.15, 3, 3)
+PeekMesh.Parent = PeekCircle
+
+-- Record path waypoints while peeking (every ~1 stud)
+table.insert(Connections, RunService.Heartbeat:Connect(function()
+    if not peekActive then return end
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local pos = hrp.Position
+    if #peekPath == 0 or (peekPath[#peekPath] - pos).Magnitude >= 1 then
+        table.insert(peekPath, pos)
+    end
+end))
+
+local function startReturn()
+    if not peekActive then return end
+    if peekReturning then return end
+    if not peekOriginPos then
+        peekActive = false
+        return
+    end
+    peekActive = false
+    peekReturning = true
+
+    -- Build return path: reverse of recorded waypoints, ending at origin
+    local returnPath = {}
+    for i = #peekPath, 1, -1 do
+        table.insert(returnPath, peekPath[i])
+    end
+    table.insert(returnPath, peekOriginPos)
+    peekPath = {}
+    local savedOrigin = peekOriginPos
+
+    task.spawn(function()
+        for _, waypoint in ipairs(returnPath) do
+            if not peekReturning then break end
+            local t = 0
+            while peekReturning and t < 3 do
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp then peekReturning = false; break end
+                local dist = (hrp.Position - waypoint).Magnitude
+                if dist < 0.5 then break end
+                hrp.CFrame = hrp.CFrame:Lerp(
+                    CFrame.new(waypoint) * (hrp.CFrame - hrp.CFrame.Position),
+                    0.35
+                )
+                t = t + task.wait()
+            end
+        end
+        -- Final snap to origin
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.CFrame = CFrame.new(savedOrigin) * (hrp.CFrame - hrp.CFrame.Position)
+        end
+        peekReturning = false
+        peekOriginPos = nil
+        PeekCircle.Transparency = 1
+        PeekCircle.CFrame = CFrame.new(0, -10000, 0)
+    end)
+end
+
+-- V press: save position, show circle at origin
+table.insert(Connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if not AutoPeekEnabled then return end
+    if input.KeyCode ~= Enum.KeyCode.V then return end
+    if peekActive or peekReturning then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+
+    peekOriginPos = hrp.Position
+    peekPath = {}
+    peekActive = true
+
+    -- Place circle on ground at saved position
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {char}
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local hit = workspace:Raycast(peekOriginPos + Vector3.new(0, 5, 0), Vector3.new(0, -20, 0), rayParams)
+    local groundY = hit and hit.Position.Y or (peekOriginPos.Y - 3)
+    PeekCircle.CFrame = CFrame.new(peekOriginPos.X, groundY + 0.1, peekOriginPos.Z) * CFrame.Angles(0, 0, math.pi / 2)
+    PeekCircle.Transparency = 0.35
+end))
+
+-- V release: walk back to origin
+table.insert(Connections, UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode ~= Enum.KeyCode.V then return end
+    startReturn()
+end))
+
+-- LMB while peeking: return after shot registers
+table.insert(Connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if not peekActive then return end
+    task.delay(0.12, startReturn)
+end))
+
+-- ==========================================
 -- TRIGGERBOT LOGIC (sub-feature of Aim Assist)
 -- Raycast from camera along LookVector. If it hits a player part → fire.
 -- Multi-Points ON: any body part triggers. OFF: head only.
@@ -1683,6 +1882,7 @@ table.insert(Connections, RunService.Heartbeat:Connect(function()
                 task.wait(0.05)
                 mouse1release()
             end)
+            startReturn()
             tbFiring = false
         end)
         break
